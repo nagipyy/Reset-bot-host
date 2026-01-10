@@ -4,6 +4,7 @@ import string
 import random
 import logging
 import requests
+import asyncio
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
@@ -28,13 +29,72 @@ class SimpleResetBot:
     def __init__(self, token: str):
         self.application = Application.builder().token(token).build()
         self.setup_handlers()
-    
+
     def setup_handlers(self):
         self.application.add_handler(CommandHandler("start", self.start))
         self.application.add_handler(CommandHandler("help", self.help))
         self.application.add_handler(CommandHandler("reset", self.reset))
         self.application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_text))
 
+    async def check_subscription(self, user_id: int, context: ContextTypes.DEFAULT_TYPE) -> bool:
+        for channel in REQUIRED_CHANNELS:
+            try:
+                chat_member = await context.bot.get_chat_member(channel, user_id)
+                if chat_member.status in ["left", "kicked"]:
+                    return False
+            except Exception:
+                return False
+        return True
+
+    async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not await self.check_subscription(update.effective_user.id, context):
+            await self.show_subscription_required(update, context)
+            return
+
+        await update.message.reply_text("🤖 Instagram Password Reset Bot")
+
+    async def show_subscription_required(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        keyboard = [[InlineKeyboardButton(ch, url=f"https://t.me/{ch[1:]}")] for ch in REQUIRED_CHANNELS]
+        await update.message.reply_text(
+            "⚠️ Join all channels to use this bot",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+
+    async def help(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        await update.message.reply_text("/reset <username or email>")
+
+    async def reset(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not context.args:
+            await update.message.reply_text("Usage: /reset <username or email>")
+            return
+        await self.process_request(update, " ".join(context.args))
+
+    async def handle_text(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        await self.process_request(update, update.message.text)
+
+    async def process_request(self, update: Update, target: str):
+        await update.message.reply_text(await self.send_reset_request(target))
+
+    async def send_reset_request(self, target: str):
+        try:
+            data = {"username": target.lstrip("@")}
+            r = requests.post(
+                "https://i.instagram.com/api/v1/accounts/send_password_reset/",
+                data=data,
+                timeout=10
+            )
+            return "✅ Reset sent" if r.status_code == 200 else f"❌ Failed {r.status_code}"
+        except Exception as e:
+            return f"❌ Error {e}"
+
+# 🔥 SINGLE GLOBAL INSTANCE (IMPORTANT)
+bot = SimpleResetBot(TOKEN)
+
+# 🔥 VERCEL WEBHOOK ENTRYPOINT
+def handler(request):
+    update = Update.de_json(request.json, bot.application.bot)
+    asyncio.run(bot.application.process_update(update))
+    return "ok"
     async def check_subscription(self, user_id: int, context: ContextTypes.DEFAULT_TYPE) -> bool:
         for channel in REQUIRED_CHANNELS:
             try:
