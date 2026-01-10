@@ -174,7 +174,7 @@ You must join all channels to use this bot.
 
 bot_instance = SimpleResetBot(TOKEN)
 
-async def handler(request):
-    update = Update.de_json(await request.json(), bot_instance.application.bot)
-    await bot_instance.application.process_update(update)
-    return {"status": "ok"}
+def handler(request):
+    update = Update.de_json(request.json, bot_instance.application.bot)
+    bot_instance.application.process_update(update)
+    return "ok"
